@@ -34,7 +34,6 @@ Optional (image optimization)
 - `jpegoptim` — recommended for lightweight JPEG optimization (lossy/lossless options).
 - `mozjpeg` — optional, provides better compression but is slower.
 
-Use `pdf2cbx -t` to test that required commands are available on the host.
 
 Optimization
 - Enable JPEG optimization with `-O` and set quality with `-q` (default 85). Example:
