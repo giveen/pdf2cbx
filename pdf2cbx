@@ -35,10 +35,10 @@ version() {
 
 thishelp() {
 	cat <<EOF
-Usage: $PrgName [options]
+Usage: $PrgName [options] <file>
 
 Options:
-  -f <file>    File to convert (required)
+	-f <file>    File to convert (use either -f or provide <file> as a positional argument)
   -z           Create a CBZ archive (default)
   -r           Create a CBR archive
   -v           Print version
@@ -49,7 +49,9 @@ Options:
 
 Notes:
   - A temporary directory is created and removed after completion.
-  - Example: $PrgName -z -f example.pdf
+	- Examples:
+			$PrgName -z -f example.pdf
+			$PrgName -z example.pdf
 EOF
 }
 
