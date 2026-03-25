@@ -89,13 +89,13 @@ convert() {
 	if [ "${OPTIMIZE:-0}" -eq 1 ]; then
 		if command -v jpegoptim >/dev/null 2>&1; then
 			echo "Optimizing JPEGs with jpegoptim (quality ${QUALITY})"
-			jpegoptim --strip-all --all-progressive --max=${QUALITY} "$TMPDIR/$PdfDir/"*.jpg || \
+				jpegoptim --strip-all --all-progressive --max="${QUALITY}" "$TMPDIR/$PdfDir/"*.jpg || \
 				echo "jpegoptim failed, continuing with unoptimized images"
 		elif command -v cjpeg >/dev/null 2>&1 || command -v mozjpeg >/dev/null 2>&1; then
 			echo "mozjpeg detected; re-encoding JPEGs (quality ${QUALITY})"
 			for f in "$TMPDIR/$PdfDir/"*.jpg; do
 				tmpf="$f.tmp"
-				cjpeg -quality ${QUALITY} -optimize -progressive -outfile "$tmpf" "$f" 2>/dev/null && mv "$tmpf" "$f" || echo "mozjpeg re-encode failed for $f"
+				cjpeg -quality "${QUALITY}" -optimize -progressive -outfile "$tmpf" "$f" 2>/dev/null && mv "$tmpf" "$f" || echo "mozjpeg re-encode failed for $f"
 			done
 		else
 			echo "Optimization requested but neither jpegoptim nor mozjpeg found; skipping optimization"
@@ -154,6 +154,17 @@ if [ -z "$file" ]; then
 		echo "no file specified, try -h for help"
 		exit $OPTERROR
 	fi
+fi
+
+# Validate QUALITY: must be an integer between 1 and 100 to avoid passing
+# unexpected values/flags to external optimizers.
+if ! printf '%s' "$QUALITY" | grep -Eq '^[0-9]+$'; then
+	echo "Invalid quality value: $QUALITY. Must be an integer between 1 and 100." >&2
+	exit 1
+fi
+if [ "$QUALITY" -lt 1 ] || [ "$QUALITY" -gt 100 ]; then
+	echo "Quality out of range: $QUALITY. Must be between 1 and 100." >&2
+	exit 1
 fi
 
 convert "$file"
