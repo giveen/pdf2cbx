@@ -1,0 +1,18 @@
+# Ignore input PDFs and generated archives
+*.pdf
+*.cbz
+*.cbr
+*.zip
+
+# Keep README and scripts
+!README.md
+!/pdf2cbx
+
+# Editor and OS artifacts
+.DS_Store
+.vscode/
+.idea/
+
+# Temp and logs
+/tmp/
+*.log

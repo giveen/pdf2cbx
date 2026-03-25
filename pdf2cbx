@@ -1,126 +1,157 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
+# pdf2cbx - convert a PDF into a CBZ/CBR archive
+# INSTALL : Simply move this script to /usr/local/bin and use "chmod +x"
 
-# INSTALL :
-# Simply move this script in /usr/local/bin and use "chmod +x" 
-#
-# REQUIRE :
-# pdftocairo, rar and zip commands, use pdftocbx -t to test requirements
-# pdftocbx -h print help
-#
-# TODO :
-# 1) Test if command work 
-# 2) do work with space named file or directory
-# 3) multilanguage
-# mickael.j@gmail.com
+set -euo pipefail
 
-PrgName="pdftocbx"
+PrgName="pdf2cbx"
 Version="0.1-1"
 OPTERROR=33
-# set TMP dir
-TMP="/tmp"
-neededCommands="pdftocairo rar zip"
+neededCommands=(pdftocairo rar zip)
 
-testDep ()
-{
-	command -v command >/dev/null 2>&1 || 
-	{
-    	echo "WARNING> \"command\" not found. Check requirements skipped !"
-       	return 1 ;
-    }
-	for requirement in ${neededCommands} ; 
-		do
-        	echo -n "checking for \"$requirement\" ... " ;
-        	command -v ${requirement} > /dev/null && {
-            echo "ok" ;
-            continue ;
-            } || {
-            echo "required but not found !" ;
-            _return=1 ;
-            }
-       	done
-        [ -z "${_return}" ] || { 
-                echo "ERR > Requirement missing." >&2 ; 
-                exit 1 ;
-        }
+# Optimization options (optional dependency)
+OPTIMIZE=0
+QUALITY=85
+
+ARC="z" # default archive type: z = CBZ, r = CBR
+
+testDep() {
+	for requirement in "${neededCommands[@]}"; do
+		printf "checking for '%s' ... " "$requirement"
+		if command -v "$requirement" >/dev/null 2>&1; then
+			echo "ok"
+		else
+			echo "required but not found !"
+			echo "ERR > Requirement missing: $requirement" >&2
+			exit 1
+		fi
+	done
 }
 
-version ()
-{
+version() {
 	echo "$PrgName version $Version"
 }
 
-thishelp ()
-{
-	echo "Usage & options"
-	echo "-f File_to_convert"
-	echo "-z create a CBZ archive (default)"
-	echo "-r create a CBR archive"
-	echo "-v Version"
-	echo "-h Help"
-	echo "-t Test dependencies"
-	echo ""
-	echo "a temp dir is created and removed after completation. You can set temp dir in script."
+thishelp() {
+	cat <<EOF
+Usage: $PrgName [options]
+
+Options:
+  -f <file>    File to convert (required)
+  -z           Create a CBZ archive (default)
+  -r           Create a CBR archive
+  -v           Print version
+  -h           Print this help
+  -t           Test dependencies
+	-O           Optimize output JPEGs with jpegoptim if available
+	-q <n>       Set JPEG quality for optimizer (default 85)
+
+Notes:
+  - A temporary directory is created and removed after completion.
+  - Example: $PrgName -z -f example.pdf
+EOF
 }
 
-convert ()
-{
+convert() {
+	local PdfFile="$1"
+	local curDir="$PWD"
+	local PdfFileName
+	PdfFileName=$(basename -- "$PdfFile")
+	local PdfDir=${PdfFileName%%.*}
 
-	PdfFile=$1
-	curDir=$PWD
-	PdfDir=${PdfFile%%.*}
-	if [ ! -d "$TMP/$PdfDir" ]
-		then
-			mkdir "$TMP/$PdfDir" 
-			echo "$PdfDir temp directory created"		
+	local TMPDIR
+	TMPDIR=$(mktemp -d)
+	trap 'rm -rf "${TMPDIR}"' EXIT
+
+	mkdir -p "$TMPDIR/$PdfDir"
+	echo "$PdfDir temp directory created"
+
+	# Support absolute and relative paths for input file
+	local input_path="$PdfFile"
+	if [ ! -f "$input_path" ]; then
+		if [ -f "$curDir/$PdfFile" ]; then
+			input_path="$curDir/$PdfFile"
 		else
-			echo "$PdfDir temp directory exist. Something wrong with last conversion ?"
+			echo "Input file not found: $PdfFile" >&2
+			return 1
+		fi
 	fi
-	cp "$curDir/"$PdfFile "$TMP/$PdfDir" 
-	echo "Extract PDF to images, sometimes take few minutes according to file size "
-	pdftocairo -jpeg "$TMP/$PdfDir/"$PdfFile "$TMP/$PdfDir/"$PdfFile
-	
-	case $ARC in
-		z) 
-		echo "Create CBZ archive"
-		zip   "$TMP/$PdfDir/"$PdfDir.cbz "$TMP/$PdfDir/"*.jpg > /dev/null;
-		mv "$TMP/$PdfDir/"$PdfDir.cbz "$curDir";
-		echo "$curDir/$PdfDir.cbz done !";;
-		r) 
-		echo "Create CBR archive"
-		rar a "$TMP/$PdfDir/"$PdfDir.cbr "$TMP/$PdfDir/"*.jpg  > /dev/null;
-		mv "$TMP/$PdfDir/"$PdfDir.cbr "$curDir";
-		echo "$curDir/$PdfDir.cbr done !";;
-		: ) echo "no archive type given (-z | -x), try -help to fix it";;
+
+	cp "$input_path" "$TMPDIR/$PdfDir/"
+	echo "Extracting PDF to images, this may take a few minutes..."
+	pdftocairo -jpeg "$TMPDIR/$PdfDir/$PdfFileName" "$TMPDIR/$PdfDir/$PdfFileName"
+	echo "Successfully converted $PdfDir"
+
+	# Optional image optimization
+	if [ "${OPTIMIZE:-0}" -eq 1 ]; then
+		if command -v jpegoptim >/dev/null 2>&1; then
+			echo "Optimizing JPEGs with jpegoptim (quality ${QUALITY})"
+			jpegoptim --strip-all --all-progressive --max=${QUALITY} "$TMPDIR/$PdfDir/"*.jpg || \
+				echo "jpegoptim failed, continuing with unoptimized images"
+		elif command -v cjpeg >/dev/null 2>&1 || command -v mozjpeg >/dev/null 2>&1; then
+			echo "mozjpeg detected; re-encoding JPEGs (quality ${QUALITY})"
+			for f in "$TMPDIR/$PdfDir/"*.jpg; do
+				tmpf="$f.tmp"
+				cjpeg -quality ${QUALITY} -optimize -progressive -outfile "$tmpf" "$f" 2>/dev/null && mv "$tmpf" "$f" || echo "mozjpeg re-encode failed for $f"
+			done
+		else
+			echo "Optimization requested but neither jpegoptim nor mozjpeg found; skipping optimization"
+		fi
+	fi
+
+	case "$ARC" in
+		z)
+			echo "Create CBZ archive"
+			zip -j "$TMPDIR/$PdfDir/$PdfDir.cbz" "$TMPDIR/$PdfDir/"*.jpg > /dev/null
+			mv "$TMPDIR/$PdfDir/$PdfDir.cbz" "$curDir"
+			echo "$curDir/$PdfDir.cbz done !" ;;
+		r)
+			echo "Create CBR archive"
+			rar a "$TMPDIR/$PdfDir/$PdfDir.cbr" "$TMPDIR/$PdfDir/"*.jpg > /dev/null
+			mv "$TMPDIR/$PdfDir/$PdfDir.cbr" "$curDir"
+			echo "$curDir/$PdfDir.cbr done !" ;;
+		*)
+			echo "no archive type given (-z | -r), try -h to fix it" ;;
 	esac
 
-
-	rm "$TMP/$PdfDir/"*
-	rmdir "$TMP/$PdfDir/"
+	rm -rf "$TMPDIR"
+	trap - EXIT
 }
 
-
-if [ -z $1 ]
-	then
-		echo "no file given (-f arg)"
-		echo "Usage: $PrgName option (-f|vh)"
-		echo "-help to list options"
-		exit $OPTERROR
+if [ "$#" -eq 0 ]; then
+	echo "no file given (-f arg)"
+	echo "Usage: $PrgName option (-f|vh)"
+	echo "-h to list options"
+	exit $OPTERROR
 fi
 
-while getopts ":f:zrtvh" Option
-	do
-  		case $Option in
-  			f) file=$OPTARG;
-				echo $OPTARG;
-				convert "$file";;
-			z) ARC=z;;
-			r) ARC=r;;
-			t) testDep;;
-		    v) version;;
-			h) thishelp;;
-			:) echo "argument required, try -h to help";;
-			\?) echo "invalid option, try -h to help";
-			   exit 1;;
- 		esac
-  	done
+file=""
+while getopts ":f:zrtvhOq:" Option; do
+	case $Option in
+		f) file=$OPTARG ;;
+		z) ARC=z ;;
+		r) ARC=r ;;
+		t) testDep ; exit 0 ;;
+		O) OPTIMIZE=1 ;;
+		q) QUALITY=$OPTARG ;;
+		v) version ; exit 0 ;;
+		h) thishelp ; exit 0 ;;
+		:) echo "argument required, try -h to help" ; exit 1 ;;
+		\?) echo "invalid option, try -h to help" ; exit 1 ;;
+	esac
+done
+
+# If no -f option was provided, accept a positional filename (so script can be
+# executed from anywhere, e.g. downloaded to ~/Downloads and run there).
+shift $((OPTIND-1))
+if [ -z "$file" ]; then
+	if [ "$#" -gt 0 ]; then
+		file="$1"
+	else
+		echo "no file specified, try -h for help"
+		exit $OPTERROR
+	fi
+fi
+
+convert "$file"
